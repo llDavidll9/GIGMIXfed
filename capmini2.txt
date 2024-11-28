@@ -1,0 +1,288 @@
+aprox.inicial2 = function(y,x,condi=T,equal=T,g1,nuentrada){
+
+# condi=T, temos que eta é conhecido, portanto estima somente omega
+# condi=F, temos que eta é desconhecido, portanto, estima eta e omega
+
+
+
+  print("aprox.inicial")
+  
+
+#### chute inicial para mu e Sigma  via t
+  modelt<-smsn.mmix(y, nu=100, mu =NULL, Sigma = NULL, shape = NULL, pii = NULL, g = g1, get.init = TRUE, criteria = FALSE,
+                      group = FALSE, family =  "t", error = 0.0001, iter.max = 100, uni.Gama = T, calc.im=FALSE,
+                      obs.prob= FALSE, kmeans.param = NULL)
+
+mu=modeln$mu
+Sigma=modelt$Sigma[[1]]
+
+svm_model <- svm(y, kernel = "polynomial",degree=1,gamma = 0.7)
+ predictions <- predict(svm_model, y)
+pii= sort(rev(table(predictions)/n))
+
+alpha=matrix(rep(1,p),p,1)
+beta=matrix(rep(1,p),p,1)  
+
+if (condi==TRUE){
+
+omega=list()
+nu.ini=list()
+
+ for (j in 1:g1){
+omega[[j]]=sqrt((modelt$nu))  # como valor inicial estamos considerando omegas iguais para os grupos
+nu.ini[[j]] <-c(nuentrada[[j]][1],omega[[j]],omega[[j]])  # considerando a reparametrização psi=gamma
+}
+
+if (equal==T){ resini=EM(y, x,alpha,beta, Sigma, nu=nu.ini, pii,g=g1,iter.max=100,error=0.0001,condi=T,equal=T)}else{ resini=EM(y, x,alpha,beta, Sigma, nu=nu.ini, pii,g=g1,iter.max=100,error=0.0001,condi=T,equal=F)}
+
+}
+
+
+if (condi==F){
+
+tal <- matrix(0, n, g1)
+S1 <- matrix(0, n, g1)
+S2<- matrix(0, n, g1)
+S4 <- matrix(0, n, g1)
+
+omega=list()
+nu.ini=list()
+etaini=c(0.5,-0.5) ## chute considerando BS depois iremos atualizar abaixo (duas atualizações)
+
+for (j in 1:g1){
+         eta0 = etaini[[j]]
+          omega[[j]]=sqrt((modelt$nu))  # como valor inicial estamos considerando omegas iguais para os grupos
+          nu.ini[[j]]=c(eta0,omega[[j]],omega[[j]]) # considerando a reparametrização psi=gamma
+}
+
+for (j in 1:g1){
+
+ ### E-step
+
+         eta0 = etaini[[j]]
+          dj <- mahalanobis(y, mu[[j]], Sigma[[j]])
+          qy = sqrt(omega[[j]] + dj)      
+          aux1 = qy*(omega[[j]])^(1/2)      
+          ct1 = matrix((omega[[j]]^(1/2)/qy)^(eta0-p/2)*(1/(2*besselK(aux1, eta0-p/2))),n,1)      
+          ct2 = matrix((omega[[j]]^(1/2)/qy)^(eta0-(p/2)-1)*(1/(2*besselK(aux1, eta0-(p/2)-1))),n,1)
+          ct4 = matrix((omega[[j]]^(1/2)/qy)^(eta0-(p/2)+1)*(1/(2*besselK(aux1, eta0-(p/2)+1))),n,1)        
+
+         u = matrix(0,n,1)      # valor esperado de u-1
+         v = matrix(0,n,1)     # valor esperado de u
+         s = matrix(0,n,1)     # valor esperado de log(u)
+         derivada=matrix(0,n,1)
+
+          u = (ct1/ct2)
+          v = (ct1/ct4)
+
+for (hh in 1:n){      
+         
+          phi4=eta0-p/2
+          f<-function(phi4){
+
+                                    besselK(aux1[hh], phi4)
+
+                                   }
+
+         derivada[hh]<-grad(f, phi4)
+         s[hh]=log(qy[hh]/sqrt(omega[[j]]))+  ( (1/besselK(aux1[hh],eta0-p/2))*derivada[hh] )
+
+                        }
+
+          nu0=c(eta0,omega[[j]])
+          d1 <- dmv_SNGH(y, mu[[j]], Sigma[[j]], nu0)
+          if(length(which(d1 == 0)) > 0) d1[which(d1 == 0)] <- .Machine$double.xmin
+
+         
+          d2 <-  d.mixedmvSNGH(y, pii, mu, Sigma, nu=nu.ini)
+          if(length(which(d2 == 0)) > 0) d2[which(d2 == 0)] <- .Machine$double.xmin
+
+
+          tal[,j] <- d1*pii[j] / d2
+          S1[,j] <- tal[,j]*u   
+          S2[,j] <- tal[,j]*s
+          S4[,j] <- tal[,j]*v
+
+}
+
+nu1.ini=list()
+
+for (j in 1:g1){
+eta1=nuentrada[[j]][1]
+omega1=nuentrada[[j]][2]
+nu1=c(eta1,omega1)
+nu1.ini[[j]] <- optim(nu1, method = "L-BFGS-B", maxfmulti, lower =c(-1,0.01), upper =c(1,3), tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par
+                         }
+
+resini=EM(y, x, alpha,beta, Sigma, nu=nu1.ini, pii,g=g1,iter.max=100,error=0.0001,condi=F,equal=F)
+
+}
+
+
+    Sigmaini=piini=nuini=alphaini=betaini=list()
+
+
+    if(class(resini) != "try-error"){
+    Sigmaini = resini$Sigma
+     nuini = resini$nu
+      piini=resini$pii
+      alphaini=resini$alpha
+      betaini=resini$beta
+      result = list(Sigma = Sigmaini, nu= nuini,pii=piini, alpha=alphaini, beta=betaini)
+      return(result)
+    }else{
+      return("NULL")
+    }
+  #} else{
+  #  return("NULL")
+  #}
+}
+
+
+maxfmulti<-function(nu,tal,S1,S4,S2){
+   eta<-nu[1]
+   omega<-nu[2]
+   soma<-(eta-1)*mean(S2)-log(besselK(omega, eta))*mean(tal)-0.5*omega*(mean(S1)+mean(S4))
+    return(-soma)
+}
+
+
+aprox.inicial3 = function(y,x,condi=T,equal=T,g1,nuentrada){
+
+# condi=T, temos que eta é conhecido, portanto estima somente omega
+# condi=F, temos que eta é desconhecido, portanto, estima eta e omega
+
+
+
+  print("aprox.inicial")
+  
+
+ 
+  #### chute inicial para mu e Sigma  via t
+  modelt<-smsn.mmix(y, nu=100, mu =NULL, Sigma = NULL, shape = NULL, pii = NULL, g = g1, get.init = TRUE, criteria = FALSE,
+                      group = FALSE, family =  "t", error = 0.0001, iter.max = 100, uni.Gama = T, calc.im=FALSE,
+                      obs.prob= FALSE, kmeans.param = NULL)
+
+
+Sigma=modelt$Sigma[[1]]
+kmeans_result <- kmeans(y, centers = 3)    # Get the cluster labels generated by K-means  cluster_labels <- kmeans_result$cluster    # Step 2: Train the SVM model using the clustered labels  svm_model <- svm(y, as.factor(cluster_labels), type = "C-classification"                   , kernel = "polynomial",degree = 1,gamma = 0.7)    # Step 3: Use the trained SVM model to classify new data  # Example of predicting for the same data (you can replace with new data)  predicted_clusters <- predict(svm_model, y)  
+pii=sort(table(predicted_clusters)/n)#sort(modelt$pii)
+
+alpha=matrix(rep(1,p),p,1)
+beta=matrix(rep(1,p),p,1)   
+
+if (condi==TRUE){
+
+omega=list()
+nu.ini=list()
+
+ for (j in 1:g1){
+omega[[j]]=sqrt((modelt$nu))  # como valor inicial estamos considerando omegas iguais para os grupos
+nu.ini[[j]] <-c(nuentrada[[j]][1],omega[[j]],omega[[j]])  # considerando a reparametrização psi=gamma
+}
+
+if (equal==T){ resini=EM(y, x,alpha,beta, Sigma, nu=nu.ini, pii,g=g1,iter.max=100,error=0.0001,condi=T,equal=T)}else{ resini=EM(y, x,alpha,beta, Sigma, nu=nu.ini, pii,g=g1,iter.max=100,error=0.0001,condi=T,equal=F)}
+
+}
+
+
+if (condi==F){
+
+tal <- matrix(0, n, g1)
+S1 <- matrix(0, n, g1)
+S2<- matrix(0, n, g1)
+S4 <- matrix(0, n, g1)
+
+omega=list()
+nu.ini=list()
+etaini=c(0.5,-0.5) ## chute considerando BS depois iremos atualizar abaixo (duas atualizações)
+
+for (j in 1:g1){
+         eta0 = etaini[[j]]
+          omega[[j]]=sqrt((modelt$nu))  # como valor inicial estamos considerando omegas iguais para os grupos
+          nu.ini[[j]]=c(eta0,omega[[j]],omega[[j]]) # considerando a reparametrização psi=gamma
+}
+
+for (j in 1:g1){
+
+ ### E-step
+
+         eta0 = etaini[[j]]
+          dj <- mahalanobis(y, mu[[j]], Sigma[[j]])
+          qy = sqrt(omega[[j]] + dj)      
+          aux1 = qy*(omega[[j]])^(1/2)      
+          ct1 = matrix((omega[[j]]^(1/2)/qy)^(eta0-p/2)*(1/(2*besselK(aux1, eta0-p/2))),n,1)      
+          ct2 = matrix((omega[[j]]^(1/2)/qy)^(eta0-(p/2)-1)*(1/(2*besselK(aux1, eta0-(p/2)-1))),n,1)
+          ct4 = matrix((omega[[j]]^(1/2)/qy)^(eta0-(p/2)+1)*(1/(2*besselK(aux1, eta0-(p/2)+1))),n,1)        
+
+         u = matrix(0,n,1)      # valor esperado de u-1
+         v = matrix(0,n,1)     # valor esperado de u
+         s = matrix(0,n,1)     # valor esperado de log(u)
+         derivada=matrix(0,n,1)
+
+          u = (ct1/ct2)
+          v = (ct1/ct4)
+
+for (hh in 1:n){      
+         
+          phi4=eta0-p/2
+          f<-function(phi4){
+
+                                    besselK(aux1[hh], phi4)
+
+                                   }
+
+         derivada[hh]<-grad(f, phi4)
+         s[hh]=log(qy[hh]/sqrt(omega[[j]]))+  ( (1/besselK(aux1[hh],eta0-p/2))*derivada[hh] )
+
+                        }
+
+          nu0=c(eta0,omega[[j]])
+          d1 <- dmv_SNGH(y, mu[[j]], Sigma[[j]], nu0)
+          if(length(which(d1 == 0)) > 0) d1[which(d1 == 0)] <- .Machine$double.xmin
+
+         
+          d2 <-  d.mixedmvSNGH(y, pii, mu, Sigma, nu=nu.ini)
+          if(length(which(d2 == 0)) > 0) d2[which(d2 == 0)] <- .Machine$double.xmin
+
+
+          tal[,j] <- d1*pii[j] / d2
+          S1[,j] <- tal[,j]*u   
+          S2[,j] <- tal[,j]*s
+          S4[,j] <- tal[,j]*v
+
+}
+
+nu1.ini=list()
+
+for (j in 1:g1){
+eta1=nuentrada[[j]][1]
+omega1=nuentrada[[j]][2]
+nu1=c(eta1,omega1)
+nu1.ini[[j]] <- optim(nu1, method = "L-BFGS-B", maxfmulti, lower =c(-1,0.01), upper =c(1,3), tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par
+                         }
+
+resini=EM(y, x, alpha,beta, Sigma, nu=nu1.ini, pii,g=g1,iter.max=100,error=0.0001,condi=F,equal=F)
+
+}
+
+
+    Sigmaini=piini=nuini=alphaini=betaini=list()
+
+
+    if(class(resini) != "try-error"){
+    Sigmaini = resini$Sigma
+     nuini = resini$nu
+      piini=resini$pii
+      alphaini=resini$alpha
+      betaini=resini$beta
+      result = list(Sigma = Sigmaini, nu= nuini,pii=piini, alpha=alphaini, beta=betaini)
+      return(result)
+    }else{
+      return("NULL")
+    }
+  #} else{
+  #  return("NULL")
+  #}
+}
+

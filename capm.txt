@@ -1,0 +1,625 @@
+EM = function(y, x, alpha, beta, Sigma, nu, pii,g,iter.max=100,error=0.001,condi=FALSE, equal=FALSE){
+
+# este algoritmo tem como criterio de parada um número máximo de iterações e/ou o criterio
+#nu=c(eta,omega,omega)  # considerando a reparametrização psi=gamma
+# condi=T, temos que eta é conhecido, portanto estima somente omega
+# condi=F, temos que eta é desconhecido, portanto, estima eta e omega
+# equal=T, temos que omegas são iguais
+
+
+criterio <- 1
+criterio1 <- 1
+count = 0  
+lkante <- 1
+y=as.matrix(y)
+n = dim(y)[1]    p = dim(y)[2]  
+
+### outra atualização do nu, ou seja, do eta e omega
+
+tal <- matrix(0, n, g)
+S1 <- matrix(0, n, g)
+S2<- matrix(0, n, g)
+S4 <- matrix(0, n, g)
+#omegaaux=c() 
+
+
+
+
+for (j in 1:g){
+
+ ### E-step
+
+         eta0 = nu[[j]][1]
+         omega=nu[[j]][2]
+
+
+dj=matrix(0,n,1)
+for (hh in 1:n){      
+mu<-alpha+beta*x[hh]
+#dj[hh] <- mahalanobis(y[hh,], mu, Sigma)
+dj[hh] = as.numeric(t(y[hh,]-mu)%*%solve(Sigma)%*%(y[hh,]-mu))
+}
+          
+          qy = sqrt(omega + dj)      
+          aux1 = qy*(omega)^(1/2)      
+          ct1 = matrix((omega^(1/2)/qy)^(eta0-p/2)*(1/(2*besselK(aux1, eta0-p/2))),n,1)      
+          ct2 = matrix((omega^(1/2)/qy)^(eta0-(p/2)-1)*(1/(2*besselK(aux1, eta0-(p/2)-1))),n,1)
+          ct4 = matrix((omega^(1/2)/qy)^(eta0-(p/2)+1)*(1/(2*besselK(aux1, eta0-(p/2)+1))),n,1)        
+
+         u = matrix(0,n,1)      # valor esperado de u-1
+         v = matrix(0,n,1)     # valor esperado de u
+         s = matrix(0,n,1)     # valor esperado de log(u)
+         derivada=matrix(0,n,1)
+
+          u = (ct1/ct2)
+          v = (ct1/ct4)
+
+for (hh in 1:n){      
+         
+          phi4=eta0-p/2
+          f<-function(phi4){
+
+                                    besselK(aux1[hh], phi4)
+
+                                   }
+
+         derivada[hh]<-grad(f, phi4)
+         s[hh]=log(qy[hh]/sqrt(omega))+  ( (1/besselK(aux1[hh],eta0-p/2))*derivada[hh] )
+
+                        }
+
+          nu0=c(eta0,omega)
+          d1 <- dmv_SNGHCAPM(y,x,alpha,beta,Sigma, nu0)
+          if(length(which(d1 == 0)) > 0) d1[which(d1 == 0)] <- .Machine$double.xmin
+          
+          d2 <-  d.mixedmvSNGHCAPM(y, x,pii,alpha,beta, Sigma, nu)
+          if(length(which(d2 == 0)) > 0) d2[which(d2 == 0)] <- .Machine$double.xmin
+
+          tal[,j] <- d1*pii[j] / d2
+          S1[,j] <- tal[,j]*u   
+          S2[,j] <- tal[,j]*s
+          S4[,j] <- tal[,j]*v
+
+}
+
+# if (condi==TRUE){
+#omegaaux[j] <- optim(omega, method = "L-BFGS-B", maxfuni, lower =0.01, upper =3, eta=eta0, tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par    
+#nu[[j]]=c(eta0,omegaaux[j])
+ #          }else{ 
+#nu1=c(eta0,omega)
+#nu[[j]] <- optim(nu1, method = "L-BFGS-B", maxfmulti, lower =c(-1,0.01), upper =c(1,3), tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par
+#}
+
+#}
+
+
+ if (condi==TRUE){
+omegaaux=c() 
+for (j in 1:g){
+
+eta0aux=nu[[j]][1]  
+ 
+if ( abs(eta0aux)==0.5){  
+	if (equal==TRUE) {# caso BS
+	omegaaux[j] = ((mean(S1) + mean(S4))/mean(tal) - 2)^(-1)
+	} else{
+	omegaaux[j] = (  (sum(S1[,j])/sum(tal[,j])) + (sum(S4[,j])/sum(tal[,j])) - 2)^(-1)}                                               }
+else{
+# ou qualquer outro valor conhecido e fixo
+
+omega=nu[[j]][2]
+if (equal==TRUE) { omegaaux[j] <- optim(omega, method = "L-BFGS-B", maxfuni, lower =0.01, upper =3, eta=eta0aux, tal=tal,S1=S1,S4=S4,S2=S2,hessian=TRUE)$par  }
+else{
+omegaaux[j] <- optim(omega, method = "L-BFGS-B", maxfuni, lower =0.01, upper =1, eta=eta0aux, tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par  }           
+
+}
+
+nu[[j]]=c(eta0aux,omegaaux[j])
+           }
+               } else {
+
+for (j in 1:g){
+eta1=nu[[j]][1]
+omega1=nu[[j]][2]
+nu1=c(eta1,omega1)
+nu[[j]] <- optim(nu1, method = "L-BFGS-B", maxfmulti, lower =c(-1,0.01), upper =c(1,3), tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par
+}
+                              }
+
+
+
+
+
+
+  Sigmaaux<-list()
+alphaaux<-matrix(0,g,p)
+alphaaux1<-matrix(0,g,1)
+betaaux<-matrix(0,g,p)
+betaaux1<-matrix(0,g,1)
+
+ while((criterio > error) && (count <= iter.max)){
+
+
+count <- count + 1
+print(count)
+
+
+
+tal <- matrix(0, n, g)
+S1 <- matrix(0, n, g)
+S2<- matrix(0, n, g)
+S4 <- matrix(0, n, g)
+
+
+for (j in 1:g){
+
+ ### E-step
+
+         eta0 = nu[[j]][1]
+          omega=nu[[j]][2]
+
+
+dj=matrix(0,n,1)
+for (hh in 1:n){      
+mu<-alpha+beta*x[hh]
+#dj[hh] <- mahalanobis(y[hh,], mu, Sigma)
+dj[hh] = as.numeric(t(y[hh,]-mu)%*%solve(Sigma)%*%(y[hh,]-mu))
+}
+
+          
+          qy = sqrt(omega + dj)      
+          aux1 = qy*(omega)^(1/2)      
+          ct1 = matrix((omega^(1/2)/qy)^(eta0-p/2)*(1/(2*besselK(aux1, eta0-p/2))),n,1)      
+          ct2 = matrix((omega^(1/2)/qy)^(eta0-(p/2)-1)*(1/(2*besselK(aux1, eta0-(p/2)-1))),n,1)
+          ct4 = matrix((omega^(1/2)/qy)^(eta0-(p/2)+1)*(1/(2*besselK(aux1, eta0-(p/2)+1))),n,1)        
+
+         u = matrix(0,n,1)      # valor esperado de u-1
+         v = matrix(0,n,1)     # valor esperado de u
+         s = matrix(0,n,1)     # valor esperado de log(u)
+         derivada=matrix(0,n,1)
+
+          u = (ct1/ct2)
+          v = (ct1/ct4)
+
+for (hh in 1:n){      
+         
+          phi4=eta0-p/2
+          f<-function(phi4){
+
+                                    besselK(aux1[hh], phi4)
+
+                                   }
+
+         derivada[hh]<-grad(f, phi4)
+         s[hh]=log(qy[hh]/sqrt(omega))+  ( (1/besselK(aux1[hh],eta0-p/2))*derivada[hh] )
+
+                        }
+
+          nu0=c(eta0,omega)
+         d1 <- dmv_SNGHCAPM(y,x,alpha,beta,Sigma, nu0)
+          if(length(which(d1 == 0)) > 0) d1[which(d1 == 0)] <- .Machine$double.xmin
+          
+          d2 <-  d.mixedmvSNGHCAPM(y, x,pii,alpha,beta, Sigma, nu)
+
+          if(length(which(d2 == 0)) > 0) d2[which(d2 == 0)] <- .Machine$double.xmin
+
+          tal[,j] <- d1*pii[j] / d2
+          S1[,j] <- tal[,j]*u   
+          S2[,j] <- tal[,j]*s
+          S4[,j] <- tal[,j]*v
+
+ ### M-step: atualizar os parametros ###
+          pii[j] <- (1/n)*sum(tal[,j])      
+
+
+sum2 <- matrix(0,p,p)
+sum3 <- matrix(0,1,p)
+sum4=0
+for (i in 1:n) {
+mui<-alpha+beta*x[i]
+sum2 <- sum2 + (S1[i,j]*(y[i,] - mui)%*%t(y[i,] - mui) )
+sum3 <- sum3 + (S1[i,j]*y[i,])
+sum4 <- sum4 + (S1[i,j]*x[i])
+   
+
+}  
+Sigmaaux[[j]]=sum2/sum(tal[,j]) 
+alphaaux[j,]=sum3
+alphaaux1[j]=sum4
+}  
+
+
+
+          GS <- 0           
+           for (j in 1:g) {GS <- GS+kronecker(tal[,j],Sigmaaux[[j]])
+                                                           }
+           Sigma<- t(rowSums(array(t(GS),dim=c(p,p,n)),dims=2))/n
+        
+            zbarra=apply(alphaaux,2,sum)/sum(S1)
+           xbarra=apply(alphaaux1,2,sum)/sum(S1)
+          alpha=matrix(c(zbarra-beta*xbarra),p,1)   
+        
+sum6=0
+sum5=matrix(0,1,p)
+for (j in 1:g){
+for (i in 1:n) {
+sum5=sum5+S1[i,j]*x[i]*(y[i,]-zbarra)
+sum6=sum6+S1[i,j]*x[i]*(x[i]-xbarra)
+
+}
+betaaux[j,]=sum5
+betaaux1[j]=sum6
+}              
+          
+ beta=      matrix(c(apply(betaaux,2,sum)/apply(betaaux1,2,sum)),p,1)
+   
+           
+ if (condi==TRUE){
+omegaaux=c() 
+for (j in 1:g){
+
+eta0aux=nu[[j]][1]  
+ 
+if ( abs(eta0aux)==0.5){  
+	if (equal==TRUE) {# caso BS
+	omegaaux[j] = ((mean(S1) + mean(S4))/mean(tal) - 2)^(-1)
+	} else{
+	omegaaux[j] = (  (sum(S1[,j])/sum(tal[,j])) + (sum(S4[,j])/sum(tal[,j])) - 2)^(-1)}                                               }
+else{
+# ou qualquer outro valor conhecido e fixo
+
+omega=nu[[j]][2]
+if (equal==TRUE) { omegaaux[j] <- optim(omega, method = "L-BFGS-B", maxfuni, lower =0.01, upper =3, eta=eta0aux, tal=tal,S1=S1,S4=S4,S2=S2,hessian=TRUE)$par  }
+else{
+omegaaux[j] <- optim(omega, method = "L-BFGS-B", maxfuni, lower =0.01, upper =3, eta=eta0aux, tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par  }           
+
+}
+
+nu[[j]]=c(eta0aux,omegaaux[j])
+           }
+               } else {
+
+for (j in 1:g){
+eta1=nu[[j]][1]
+omega1=nu[[j]][2]
+nu1=c(eta1,omega1)
+nu[[j]] <- optim(nu1, method = "L-BFGS-B", maxfmulti, lower =c(-1,0.01), upper =c(1,3), tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par
+}
+                              }
+
+
+
+pii[g] <- 1 - (sum(pii) - pii[g])
+
+
+
+zero.pos <- NULL
+zero.pos <- which(pii == 0)
+if(length(zero.pos) != 0){
+pii[zero.pos] <- 1e-10
+pii[which(pii == max(pii))] <- max(pii) - sum(pii[zero.pos])
+                         }
+
+lk <- sum(log( d.mixedmvSNGHCAPM (y,x ,pii, alpha,beta,Sigma, nu) ))
+
+criterio <- abs((lk/lkante)-1)
+
+
+lkante <- lk
+
+
+
+
+}
+
+
+result = list(alpha = alpha,beta=beta, Sigma = Sigma, nu=nu,pii=pii,lk=lk,dj=dj)
+  
+  return(result)
+
+}
+
+################################################################################
+## Funcao para maximizar
+################################################################################
+
+
+maxfuni<-function(omega,eta,tal,S1,S4,S2){ 
+  soma<-(eta-1)*mean(S2)-log(besselK(omega, eta))*mean(tal)-0.5*omega*(mean(S1)+mean(S4))
+	return(-soma)
+}
+
+maxfmulti<-function(nu,tal,S1,S4,S2){
+   eta<-nu[1]
+   omega<-nu[2]
+   soma<-(eta-1)*mean(S2)-log(besselK(omega, eta))*mean(tal)-0.5*omega*(mean(S1)+mean(S4))
+    return(-soma)
+}
+
+
+
+EM2 = function(y, x, alpha, beta, Sigma, nu, pii,g,iter.max=100,error=0.001,condi=FALSE, equal=FALSE){
+
+# este algoritmo tem como criterio de parada um número máximo de iterações e/ou o criterio
+#nu=c(eta,omega,omega)  # considerando a reparametrização psi=gamma
+# condi=T, temos que eta é conhecido, portanto estima somente omega
+# condi=F, temos que eta é desconhecido, portanto, estima eta e omega
+# equal=T, temos que omegas são iguais
+
+
+criterio <- 1
+criterio1 <- 1
+count = 0  
+lkante <- 1
+
+n = dim(y)[1]    
+p = dim(y)[2]
+
+### outra atualização do nu, ou seja, do eta e omega
+
+tal <- matrix(0, n, g)
+S1 <- matrix(0, n, g)
+S2<- matrix(0, n, g)
+S4 <- matrix(0, n, g)
+omegaaux=c() 
+
+
+
+
+for (j in 1:g){
+
+ ### E-step
+
+         eta0 = nu[[j]][1]
+         omega=nu[[j]][2]
+
+
+dj=matrix(0,n,1)
+for (hh in 1:n){      
+mu<-alpha+beta*x[hh]
+#dj[hh] <- mahalanobis(y[hh,], mu, Sigma)
+dj[hh] = as.numeric(t(y[hh,]-mu)%*%solve(Sigma)%*%(y[hh,]-mu))
+}
+          
+          qy = sqrt(omega + dj)      
+          aux1 = qy*(omega)^(1/2)      
+          ct1 = matrix((omega^(1/2)/qy)^(eta0-p/2)*(1/(2*besselK(aux1, eta0-p/2))),n,1)      
+          ct2 = matrix((omega^(1/2)/qy)^(eta0-(p/2)-1)*(1/(2*besselK(aux1, eta0-(p/2)-1))),n,1)
+          ct4 = matrix((omega^(1/2)/qy)^(eta0-(p/2)+1)*(1/(2*besselK(aux1, eta0-(p/2)+1))),n,1)        
+
+         u = matrix(0,n,1)      # valor esperado de u-1
+         v = matrix(0,n,1)     # valor esperado de u
+         s = matrix(0,n,1)     # valor esperado de log(u)
+         derivada=matrix(0,n,1)
+
+          u = (ct1/ct2)
+          v = (ct1/ct4)
+
+for (hh in 1:n){      
+         
+          phi4=eta0-p/2
+          f<-function(phi4){
+
+                                    besselK(aux1[hh], phi4)
+
+                                   }
+
+         derivada[hh]<-grad(f, phi4)
+         s[hh]=log(qy[hh]/sqrt(omega))+  ( (1/besselK(aux1[hh],eta0-p/2))*derivada[hh] )
+
+                        }
+
+          nu0=c(eta0,omega)
+          d1 <- dmv_SNGHCAPM(y,x,alpha,beta,Sigma, nu0)
+          if(length(which(d1 == 0)) > 0) d1[which(d1 == 0)] <- .Machine$double.xmin
+          
+          d2 <-  d.mixedmvSNGHCAPM(y, x,pii,alpha,beta, Sigma, nu)
+          if(length(which(d2 == 0)) > 0) d2[which(d2 == 0)] <- .Machine$double.xmin
+
+          tal[,j] <- d1*pii[j] / d2
+          S1[,j] <- tal[,j]*u   
+          S2[,j] <- tal[,j]*s
+          S4[,j] <- tal[,j]*v
+
+
+ if (condi==TRUE){
+omegaaux[j] <- optim(omega, method = "L-BFGS-B", maxfuni, lower =0.01, upper =4, eta=eta0, tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par    
+nu[[j]]=c(eta0,omegaaux[j])
+           }else{ 
+nu1=c(eta0,omega)
+nu[[j]] <- optim(nu1, method = "L-BFGS-B", maxfmulti, lower =c(-1,0.01), upper =c(1,3), tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par
+}
+
+}
+
+
+
+
+  Sigmaaux<-list()
+alphaaux<-matrix(0,g,p)
+alphaaux1<-matrix(0,g,1)
+betaaux<-matrix(0,g,p)
+betaaux1<-matrix(0,g,1)
+
+ while((criterio > error) && (count <= iter.max)){
+
+
+count <- count + 1
+print(count)
+
+
+
+tal <- matrix(0, n, g)
+S1 <- matrix(0, n, g)
+S2<- matrix(0, n, g)
+S4 <- matrix(0, n, g)
+
+
+for (j in 1:g){
+
+ ### E-step
+
+         eta0 = nu[[j]][1]
+          omega=nu[[j]][2]
+
+
+dj=matrix(0,n,1)
+for (hh in 1:n){      
+mu<-alpha+beta*x[hh]
+#dj[hh] <- mahalanobis(y[hh,], mu, Sigma)
+dj[hh] = as.numeric(t(y[hh,]-mu)%*%solve(Sigma)%*%(y[hh,]-mu))
+}
+
+          
+          qy = sqrt(omega + dj)      
+          aux1 = qy*(omega)^(1/2)      
+          ct1 = matrix((omega^(1/2)/qy)^(eta0-p/2)*(1/(2*besselK(aux1, eta0-p/2))),n,1)      
+          ct2 = matrix((omega^(1/2)/qy)^(eta0-(p/2)-1)*(1/(2*besselK(aux1, eta0-(p/2)-1))),n,1)
+          ct4 = matrix((omega^(1/2)/qy)^(eta0-(p/2)+1)*(1/(2*besselK(aux1, eta0-(p/2)+1))),n,1)        
+
+         u = matrix(0,n,1)      # valor esperado de u-1
+         v = matrix(0,n,1)     # valor esperado de u
+         s = matrix(0,n,1)     # valor esperado de log(u)
+         derivada=matrix(0,n,1)
+
+          u = (ct1/ct2)
+          v = (ct1/ct4)
+
+for (hh in 1:n){      
+         
+          phi4=eta0-p/2
+          f<-function(phi4){
+
+                                    besselK(aux1[hh], phi4)
+
+                                   }
+
+         derivada[hh]<-grad(f, phi4)
+         s[hh]=log(qy[hh]/sqrt(omega))+  ( (1/besselK(aux1[hh],eta0-p/2))*derivada[hh] )
+
+                        }
+
+          nu0=c(eta0,omega)
+         d1 <- dmv_SNGHCAPM(y,x,alpha,beta,Sigma, nu0)
+          if(length(which(d1 == 0)) > 0) d1[which(d1 == 0)] <- .Machine$double.xmin
+          
+          d2 <-  d.mixedmvSNGHCAPM(y, x,pii,alpha,beta, Sigma, nu)
+
+          if(length(which(d2 == 0)) > 0) d2[which(d2 == 0)] <- .Machine$double.xmin
+
+          tal[,j] <- d1*pii[j] / d2
+          S1[,j] <- tal[,j]*u   
+          S2[,j] <- tal[,j]*s
+          S4[,j] <- tal[,j]*v
+
+ ### M-step: atualizar os parametros ###
+          pii[j] <- (1/n)*sum(tal[,j])      
+
+
+sum2 <- matrix(0,p,p)
+sum3 <- matrix(0,1,p)
+sum4=0
+for (i in 1:n) {
+mui<-alpha+beta*x[i]
+sum2 <- sum2 + (S1[i,j]*(y[i,] - mui)%*%t(y[i,] - mui) )
+sum3 <- sum3 + (S1[i,j]*y[i,])
+sum4 <- sum4 + (S1[i,j]*x[i])
+   
+
+}  
+Sigmaaux[[j]]=sum2/sum(tal[,j]) 
+alphaaux[j,]=sum3
+alphaaux1[j]=sum4
+}  
+
+
+
+          GS <- 0           
+           for (j in 1:g) {GS <- GS+kronecker(tal[,j],Sigmaaux[[j]])
+                                                           }
+           Sigma<- t(rowSums(array(t(GS),dim=c(p,p,n)),dims=2))/n
+        
+            zbarra=apply(alphaaux,2,sum)/sum(S1)
+           xbarra=apply(alphaaux1,2,sum)/sum(S1)
+          alpha=matrix(c(zbarra-beta*xbarra),p,1)   
+        
+sum6=0
+sum5=matrix(0,1,p)
+for (j in 1:g){
+for (i in 1:n) {
+sum5=sum5+S1[i,j]*x[i]*(y[i,]-zbarra)
+sum6=sum6+S1[i,j]*x[i]*(x[i]-xbarra)
+
+}
+betaaux[j,]=sum5
+betaaux1[j]=sum6
+}              
+          
+ beta=      matrix(c(apply(betaaux,2,sum)/apply(betaaux1,2,sum)),p,1)
+   
+           
+ if (condi==TRUE){
+omegaaux=c() 
+for (j in 1:g){
+
+eta0aux=nu[[j]][1]  
+ 
+if ( abs(eta0aux)==0.5){  
+	if (equal==TRUE) {# caso BS
+	omegaaux[j] = ((mean(S1) + mean(S4))/mean(tal) - 2)^(-1)
+	} else{
+	omegaaux[j] = (  (sum(S1[,j])/sum(tal[,j])) + (sum(S4[,j])/sum(tal[,j])) - 2)^(-1)}                                               }
+else{
+# ou qualquer outro valor conhecido e fixo
+
+omega=nu[[j]][2]
+if (equal==TRUE) { omegaaux[j] <- optim(omega, method = "L-BFGS-B", maxfuni, lower =0.01, upper =3, eta=eta0aux, tal=tal,S1=S1,S4=S4,S2=S2,hessian=TRUE)$par  }
+else{
+omegaaux[j] <- optim(omega, method = "L-BFGS-B", maxfuni, lower =0.01, upper =3, eta=eta0aux, tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par  }           
+
+}
+
+nu[[j]]=c(eta0aux,omegaaux[j])
+           }
+               } else {
+
+for (j in 1:g){
+eta1=nu[[j]][1]
+omega1=nu[[j]][2]
+nu1=c(eta1,omega1)
+nu[[j]] <- optim(nu1, method = "L-BFGS-B", maxfmulti, lower =c(-1,0.01), upper =c(1,3), tal=tal[,j],S1=S1[,j],S4=S4[,j],S2=S2[,j],hessian=TRUE)$par
+}
+                              }
+
+
+
+pii[g] <- 1 - (sum(pii) - pii[g])
+
+
+
+zero.pos <- NULL
+zero.pos <- which(pii == 0)
+if(length(zero.pos) != 0){
+pii[zero.pos] <- 1e-10
+pii[which(pii == max(pii))] <- max(pii) - sum(pii[zero.pos])
+                         }
+
+lk <- sum(log( d.mixedmvSNGHCAPM (y,x ,pii, alpha,beta,Sigma, nu) ))
+
+criterio <- abs((lk/lkante)-1)
+
+
+lkante <- lk
+
+
+
+
+}
+
+
+result = list(alpha = alpha,beta=beta, Sigma = Sigma, nu=nu,pii=pii,lk=lk)
+  
+  return(result)
+
+}
+

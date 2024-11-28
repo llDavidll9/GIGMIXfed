@@ -1,0 +1,59 @@
+#rm(list=ls(all=TRUE))
+
+#install.packages('ghyp')
+#install.packages('expm')
+#install.packages('mvtnorm')
+#install.packages('mixsmsn')
+require(ghyp)
+require(expm)
+require(mvtnorm)
+require(mixsmsn)
+
+
+#### mudar o diretório de trabalho ###########
+source("gera.txt")
+source("densidades.txt")
+source("capm.txt")
+
+
+
+############################################# Simulando ################################
+
+n=1000
+p=2
+
+alpha=matrix(c(0.5,0.5),p,1)
+beta=matrix(c(1,2),p,1)
+x=rnorm(n)
+
+mu=matrix(0,n,p)
+for (hh in 1:n){      
+mu[hh,]<-alpha+beta*x[hh]
+}
+
+Sigma= matrix(c(1,0.5,0.5,2), 2,2)
+
+mu1<-mu 
+Sigma1 <-Sigma
+shape1 <-c(0,0)
+eta1<-0.5  
+omega1<-2
+nu1 <-c(eta1,omega1,omega1)  # considerando a reparametrização psi=gamma
+
+mu2<-mu1
+Sigma2 <- Sigma1
+eta2<--0.5
+omega2=2
+nu2 <-c(eta2,omega2,omega2)  # considerando a reparametrização psi=gamma
+shape2 <-c(0,0)
+pii<-c(0.5,0.5)
+
+
+arg1 = list(mu=mu1, Sigma=Sigma1, shape=shape1, nu=nu1)
+arg2 = list(mu=mu2, Sigma=Sigma2, shape=shape2, nu=nu2)
+y <- rmmix(n=n, p = pii, "GIGCAPM", list(arg1,arg2))
+
+nu<-list(nu1,nu2)
+
+saida=EM(y, x, alpha, beta, Sigma, nu, pii,g=1,iter.max=100,error=0.0001,condi=T, equal=T)
+
